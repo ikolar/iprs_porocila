@@ -10,6 +10,7 @@ import org.apache.tika.io.*;
 import org.apache.tika.parser.*;
 import org.apache.tika.detect.*;
 import org.apache.tika.metadata.*;
+import org.apache.commons.logging.*;
 
 /**
  * Converts .doc file into html using the apache tika library.
@@ -18,8 +19,10 @@ import org.apache.tika.metadata.*;
  */
 
 public class DocToHtml {
+    private static final Log logger = LogFactory.getLog(TikaCLI.class);
+
     public static void main(String[] args) throws Exception {
-        String html = callTika(new File(args[0]));
+        String html = callTika(new File(args[0]).getCanonicalFile());
         System.out.print(html);
     }
 
@@ -27,6 +30,7 @@ public class DocToHtml {
      * Convert the .doc/.docx file into html
      */
     public static String callTika(File file) throws Exception {
+        logger.info("Initializing Tika parser");
         // initialize the tika framework
         ParseContext context = new ParseContext();
         Detector detector = new DefaultDetector();
@@ -45,6 +49,7 @@ public class DocToHtml {
             String encoding = null; // autodetect
             org.xml.sax.ContentHandler handler = 
                 new org.apache.tika.sax.ExpandedTitleContentHandler(getTransformerHandler(output, "html", encoding, prettyPrint));
+            logger.info("Parsing url " + url);
             parser.parse(input, handler, metadata, context);
 
         } finally {
@@ -52,6 +57,7 @@ public class DocToHtml {
             output.flush();
         }
 
+        logger.info("Parsing url " + url + " done");
         return output.toString();
     }
 
