@@ -1,8 +1,13 @@
+package si.iprs.reports;
+
 import java.io.*;
 import java.util.*;
 import java.net.*;
 import java.text.*;
 import java.util.regex.*;
+import java.util.*;
+import org.apache.commons.io.*;
+import org.apache.commons.io.filefilter.*;
 import org.apache.commons.logging.*;
 import org.jsoup.*;
 import org.jsoup.select.*;
@@ -112,5 +117,72 @@ public class ParseDocuments {
      *
      */
     public void parse() throws Exception {
+    }
+    
+    public List<File> prepareDocuments(File sourceDir) {
+        return prepareDocuments(sourceDir, sourceDir);
+    }    
+
+    /**
+     *
+     */  
+    public List<File> prepareDocuments(File sourceDir, File destinationDir) {
+        // find the source files
+        Collection<File> sources = FileUtils.listFiles(
+            sourceDir,
+            new IOFileFilter() {
+                public boolean accept(File file) {
+                    return accept(file.getParentFile(), file.getName());
+                }
+                
+                public boolean accept(File dir, String name) {
+                    if (FilenameUtils.getBaseName(name).toLowerCase().endsWith(".merged"))
+                        return false;
+                    
+                    String ext = FilenameUtils.getExtension(name);
+                    if (! ("doc".equalsIgnoreCase(ext) || "docx".equalsIgnoreCase(ext)) )
+                        return false;
+
+                    return true;
+                }
+            },
+            TrueFileFilter.INSTANCE
+        );
+
+        // see who needs what        
+        for (File src : sources) {
+            String relative = src.toURI().relativize(destinationDir.toURI()).getPath();
+            File tmp = new File(destinationDir, relative);
+            String base = tmp.getName();
+            
+            Document doc = new Document(src);
+            doc.setMerged(new File(tmp.getParent(), base + ".merged.docx"));
+            doc.setHtml(new File(tmp.getParent(), base + ".html"));
+            doc.setMergedHtml(new File(tmp.getParent(), base + ".merged.html"));
+            
+            FileUtils.forceMkdir(doc.getMerged().getParentFile());
+            logger.info("CONVERTING: " + src + "\n => " + doc.getMerged());
+       }
+       /* if (toAccept().length() > 0) {
+            log.info("Need to accept changes in " + toAccept.length() + " documents, pls wait .."); 
+            for (List<File> pair : toAccept) {
+ :               acceptor.acceptAllChanges(pair.get(0), pair.get(1), true);
+            }
+        }        
+*/
+        return null;
+        
+        AcceptAllChanges acceptor = new AcceptAllChanges();
+        List<File> extracted = new ArrayList<File>();
+        for (File doc: docs) {
+            // convert both files. The accepted version may be truncated because 
+            // we're using the rrial version of Aspose
+
+            // DocToHtml.callTika(
+
+
+            String src = acceptor.getMergedFile(doc);
+            // String html = 
+        }
     }
 }
