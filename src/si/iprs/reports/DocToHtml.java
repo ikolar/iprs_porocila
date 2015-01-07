@@ -6,33 +6,51 @@ import java.net.*;
 import javax.xml.transform.*;
 import javax.xml.transform.sax.*;
 import javax.xml.transform.stream.*;
+import org.xml.sax.SAXException;
 import org.apache.tika.sax.*;
 import org.apache.tika.cli.*;
 import org.apache.tika.io.*;
 import org.apache.tika.parser.*;
 import org.apache.tika.detect.*;
 import org.apache.tika.metadata.*;
+import org.apache.tika.exception.*;
 import org.apache.commons.logging.*;
 
 /**
- * Converts .doc file into html using the apache tika library.
+ * Converts .doc/.docx file into html using the Apache Tika library 
  *
- * The q&d way: tha the org.apache.tika.cli.TikaCLI class and just copy the needed bootstrapping code here.
+ * The q&amp; way: take the org.apache.tika.cli.TikaCLI class and just copy the needed bootstrapping code here.
  */
 
 public class DocToHtml {
     private static final Log logger = LogFactory.getLog(TikaCLI.class);
 
     public static void main(String[] args) throws Exception {
-        String html = callTika(new File(args[0]).getCanonicalFile());
-        System.out.print(html);
+        if (args.length < 1) {
+            System.err.println("Usage: java -cp .. DocToHtml <doc or docx file>");
+            System.exit(-1);
+        }
+        
+        callTika(new File(args[0]).getCanonicalFile());
+    }
+
+
+    public static void callTika(File doc, File html) throws IOException {
+        String s = DocToHtml.callTika(doc);
+
+        FileWriter out = new FileWriter(html);
+        try {
+            out.write(s);
+        } finally {
+            out.flush();
+            out.close();
+        }
     }
 
     /**
      * Convert the .doc/.docx file into html
      */
-    public static String callTika(File file) throws Exception {
-        logger.info("Initializing Tika parser");
+    public static String callTika(File doc) throws IOException {
         // initialize the tika framework
         ParseContext context = new ParseContext();
         Detector detector = new DefaultDetector();
@@ -41,26 +59,38 @@ public class DocToHtml {
 
         // set the input and output streams
         Metadata metadata = new Metadata();
-        URL url = file.toURI().toURL();
+        URL url = doc.toURI().toURL();
         InputStream input = TikaInputStream.get(url, metadata);        
-        OutputStream output = new ByteArrayOutputStream();
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
 
         // go!
+        String detectedCharset = null;
         try {
             boolean prettyPrint = false; // don't add extra newlines
             String encoding = null; // autodetect
+            TransformerHandler tHandler = getTransformerHandler(output, "html", encoding, prettyPrint);            
             org.xml.sax.ContentHandler handler = 
-                new org.apache.tika.sax.ExpandedTitleContentHandler(getTransformerHandler(output, "html", encoding, prettyPrint));
+                new org.apache.tika.sax.ExpandedTitleContentHandler(tHandler);
             logger.info("Parsing url " + url);
             parser.parse(input, handler, metadata, context);
+            detectedCharset = tHandler.getTransformer().getOutputProperty(OutputKeys.ENCODING);
 
+        } catch (TransformerConfigurationException tce) {
+            throw new IOException(tce);
+        } catch (SAXException se) {
+            throw new IOException(se);
+        } catch (TikaException te) {
+            throw new IOException(te);
         } finally {
             input.close();
             output.flush();
         }
 
-        logger.info("Parsing url " + url + " done");
-        return output.toString();
+        if (detectedCharset == null) {
+            return output.toString(); // try our luck with the platforms default enc
+        } else {
+            return output.toString(detectedCharset);
+        }
     }
 
     /**

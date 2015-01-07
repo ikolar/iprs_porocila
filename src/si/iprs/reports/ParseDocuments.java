@@ -52,11 +52,13 @@ public class ParseDocuments {
         LogFactory.getLog(ParseDocuments.class);
     private boolean debug = false;
 
-    private File zapisnikiDir, neuvedbeDir, ustavitveDir, odlocbeDir;
+	private static final String[] documentDirs = new String[] { "zapisniki_dir", "neuvedbe_dir", "ustavitve_dir", "odlocbe_dir", "prekrski_dir", "destination_dir" };
+    private Map<String, File> sourceDirs = new HashMap<String, File>();
+    private File destinationDir;
 
     public static void main(String[] args) throws Exception {
         ParseDocuments parser = new ParseDocuments();
-        // parser.parse();
+        parser.prepareDocuments();
     }
 
     /**
@@ -87,24 +89,32 @@ public class ParseDocuments {
 
         // todo: document dirs (zapisniki, sklepi o neuvedbi, sklepi o ustavitvi, odločbe)
 	    logger.info("Checking whether the document directories are properly defined in the properties file ..");
-	    String[] documentDirs = new String[] { "zapisniki_dir", "neuvedbe_dir", "ustavitve_dir", "odlocbe_dir" };
 	    boolean critical = false;
 	    for (String d : documentDirs) {
 		    if (props.getProperty(d) == null) {
-			    logger.warn("o_O property '" + d + 
+			    logger.error("o_O property '" + d + 
 				    "' not defined in properties file " + propertiesFilename);
 			    critical = true;
-		    } else if (! new File(props.getProperty(d)).isDirectory()) {
-			    logger.warn("o_O directory '" + new File(props.getProperty(d)).getCanonicalPath() + 
+                continue;
+		    } 
+            
+            File dir = new File(props.getProperty(d));
+            if (! dir.isDirectory()) {
+			    logger.error("o_O directory '" + dir.getCanonicalPath() + 
                     " for property '" + d + "' does not exist");
 			    critical = true;
-		    }
+                  
+		    } else {
+                if ("destination_dir".equals(d))
+                    destinationDir = dir;
+                else
+                    sourceDirs.put(d, dir); 
+            }
 	    }
         if (critical) {
             throw new FileNotFoundException("o_O one or more document dirs are undefined and/or don't exist." + 
                 " Check the log for details.");
         }
-        logger.info("All ok :)");
     }
 
     /**
@@ -119,14 +129,27 @@ public class ParseDocuments {
     public void parse() throws Exception {
     }
     
-    public List<File> prepareDocuments(File sourceDir) {
-        return prepareDocuments(sourceDir, sourceDir);
-    }    
+    /**
+      * Prepare documents from all source directories for parsing.
+      */
+    public List<Document> prepareDocuments() throws IOException {
+        List<Document> allDocs = new ArrayList<Document>();
 
+        for (Map.Entry<String, File> source : sourceDirs.entrySet()) {
+            File sourceDir = source.getValue();
+            allDocs.addAll(prepareDocuments(sourceDir, destinationDir));
+
+        }
+
+        return allDocs;
+    }    
+    
     /**
      *
      */  
-    public List<File> prepareDocuments(File sourceDir, File destinationDir) {
+    public List<Document> prepareDocuments(File sourceDir, File destinationDir) throws IOException {
+        logger.info(String.format("Preparing docs, sourceDir = %s, destinationDir = %s", sourceDir, destinationDir)); 
+
         // find the source files
         Collection<File> sources = FileUtils.listFiles(
             sourceDir,
@@ -134,7 +157,7 @@ public class ParseDocuments {
                 public boolean accept(File file) {
                     return accept(file.getParentFile(), file.getName());
                 }
-                
+
                 public boolean accept(File dir, String name) {
                     if (FilenameUtils.getBaseName(name).toLowerCase().endsWith(".merged"))
                         return false;
@@ -150,39 +173,48 @@ public class ParseDocuments {
         );
 
         // see who needs what        
+        List<Document> docs = new ArrayList<Document>();
+        List<Document> toMerge = new ArrayList<Document>();
+        List<Document> toHtml = new ArrayList<Document>();
+        List<Document> toMergedHtml = new ArrayList<Document>();
         for (File src : sources) {
-            String relative = src.toURI().relativize(destinationDir.toURI()).getPath();
-            File tmp = new File(destinationDir, relative);
-            String base = tmp.getName();
+            File outdir = new File(destinationDir, sourceDir.getName());
+            String base = src.getName();
             
             Document doc = new Document(src);
-            doc.setMerged(new File(tmp.getParent(), base + ".merged.docx"));
-            doc.setHtml(new File(tmp.getParent(), base + ".html"));
-            doc.setMergedHtml(new File(tmp.getParent(), base + ".merged.html"));
+            doc.setMerged(new File(outdir, base + ".merged.docx"));
+            doc.setHtml(new File(outdir, base + ".html"));
+            doc.setMergedHtml(new File(outdir, base + ".merged.html"));
+            docs.add(doc);
+
+            if (! doc.getMerged().exists())
+                toMerge.add(doc);
+            if (! doc.getHtml().exists())
+                toHtml.add(doc);
+            if (! doc.getMergedHtml().exists())
+                toMergedHtml.add(doc);
             
             FileUtils.forceMkdir(doc.getMerged().getParentFile());
-            logger.info("CONVERTING: " + src + "\n => " + doc.getMerged());
-       }
-       /* if (toAccept().length() > 0) {
-            log.info("Need to accept changes in " + toAccept.length() + " documents, pls wait .."); 
-            for (List<File> pair : toAccept) {
- :               acceptor.acceptAllChanges(pair.get(0), pair.get(1), true);
-            }
-        }        
-*/
-        return null;
-        
-        AcceptAllChanges acceptor = new AcceptAllChanges();
-        List<File> extracted = new ArrayList<File>();
-        for (File doc: docs) {
-            // convert both files. The accepted version may be truncated because 
-            // we're using the rrial version of Aspose
-
-            // DocToHtml.callTika(
-
-
-            String src = acceptor.getMergedFile(doc);
-            // String html = 
         }
+        logger.info(String.format("Need to prepare %d merges, %d htmls, %d mergedHtmls", toMerge.size(), toHtml.size(), toMergedHtml.size()));
+
+        AcceptAllChanges acceptor = new AcceptAllChanges();
+        for (Document doc : toMerge) {
+            acceptor.acceptAllChanges(doc.getSrc(), doc.getMerged(), false);
+        }
+
+        for (Document doc : toHtml) {
+            DocToHtml.callTika(doc.getSrc(), doc.getHtml());
+        }
+        
+        for (Document doc : toMergedHtml) {
+            if (! doc.getMerged().exists()) {
+                logger.warn("o_O can't make merged html file if merged file " + doc.getMerged() + " doesn't exist ..");
+                continue;
+            }
+            DocToHtml.callTika(doc.getMerged(), doc.getMergedHtml());
+        }                            
+
+        return docs;
     }
 }
